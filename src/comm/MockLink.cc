@@ -115,7 +115,6 @@ MockLink::MockLink(MockConfiguration* config)
     moveToThread(this);
 
     _loadParams();
-    QObject::connect(this, &MockLink::_incomingBytes, this, &MockLink::_handleIncomingBytes);
 }
 
 MockLink::~MockLink(void)
@@ -314,16 +313,7 @@ void MockLink::respondWithMavlinkMessage(const mavlink_message_t& msg)
 }
 
 /// @brief Called when QGC wants to write bytes to the MAV
-void MockLink::writeBytes(const char* bytes, qint64 cBytes)
-{
-    // Package up the data so we can signal it over to the right thread
-    QByteArray byteArray(bytes, cBytes);
-
-    emit _incomingBytes(byteArray);
-}
-
-/// @brief Handles bytes from QGC on the thread
-void MockLink::_handleIncomingBytes(const QByteArray bytes)
+void MockLink::_writeBytes(const QByteArray bytes)
 {
     if (_inNSH) {
         _handleIncomingNSHBytes(bytes.constData(), bytes.count());
@@ -796,16 +786,61 @@ void MockLink::_handleFTP(const mavlink_message_t& msg)
 void MockLink::_handleCommandLong(const mavlink_message_t& msg)
 {
     mavlink_command_long_t request;
+    uint8_t commandResult = MAV_RESULT_UNSUPPORTED;
 
     mavlink_msg_command_long_decode(&msg, &request);
 
-    if (request.command == MAV_CMD_COMPONENT_ARM_DISARM) {
+    switch (request.command) {
+    case MAV_CMD_COMPONENT_ARM_DISARM:
         if (request.param1 == 0.0f) {
             _mavBaseMode &= ~MAV_MODE_FLAG_SAFETY_ARMED;
         } else {
             _mavBaseMode |= MAV_MODE_FLAG_SAFETY_ARMED;
         }
+        commandResult = MAV_RESULT_ACCEPTED;
+        break;
+    case MAV_CMD_PREFLIGHT_CALIBRATION:
+    case MAV_CMD_PREFLIGHT_STORAGE:
+        commandResult = MAV_RESULT_ACCEPTED;
+        break;
+    case MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES:
+        commandResult = MAV_RESULT_ACCEPTED;
+        _respondWithAutopilotVersion();
+        break;
     }
+
+    mavlink_message_t commandAck;
+    mavlink_msg_command_ack_pack(_vehicleSystemId,
+                                 _vehicleComponentId,
+                                 &commandAck,
+                                 request.command,
+                                 commandResult);
+    respondWithMavlinkMessage(commandAck);
+}
+
+void MockLink::_respondWithAutopilotVersion(void)
+{
+    mavlink_message_t msg;
+
+    uint8_t customVersion[8];
+    memset(customVersion, 0, sizeof(customVersion));
+
+    // Only flight_sw_version is supported a this point
+    mavlink_msg_autopilot_version_pack(_vehicleSystemId,
+                                       _vehicleComponentId,
+                                       &msg,
+                                       0,                                           // capabilities,
+                                       (1 << (8*3)) | FIRMWARE_VERSION_TYPE_DEV,    // flight_sw_version,
+                                       0,                                           // middleware_sw_version,
+                                       0,                                           // os_sw_version,
+                                       0,                                           // board_version,
+                                       (uint8_t *)&customVersion,                   // flight_custom_version,
+                                       (uint8_t *)&customVersion,                   // middleware_custom_version,
+                                       (uint8_t *)&customVersion,                   // os_custom_version,
+                                       0,                                           // vendor_id,
+                                       0,                                           // product_id,
+                                       0);                                          // uid
+    respondWithMavlinkMessage(msg);
 }
 
 void MockLink::setMissionItemFailureMode(MockLinkMissionItemHandler::FailureMode_t failureMode)

@@ -106,7 +106,7 @@ void PX4FirmwareUpgradeThreadWorker::_findBoardOnce(void)
             _foundBoardPortInfo = portInfo;
             emit foundBoard(_findBoardFirstAttempt, portInfo, boardType);
             if (!_findBoardFirstAttempt) {
-                if (boardType == QGCSerialPortInfo::BoardType3drRadio) {
+                if (boardType == QGCSerialPortInfo::BoardTypeSikRadio) {
                     _3drRadioForceBootloader(portInfo);
                     return;
                 } else {
@@ -141,7 +141,7 @@ bool PX4FirmwareUpgradeThreadWorker::_findBoardFromPorts(QGCSerialPortInfo& port
         qCDebug(FirmwareUpgradeVerboseLog) << "\tproduct ID:" << info.productIdentifier();
         
         boardType = info.boardType();
-        if (boardType != QGCSerialPortInfo::BoardTypeUnknown) {
+        if (info.canFlash()) {
             portInfo = info;
             return true;
         }

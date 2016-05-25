@@ -71,17 +71,18 @@ QGCView {
         QGCFlickable {
             clip:               true
             anchors.fill:       parent
-            contentHeight:      sliderRect.y + sliderRect.height
+            contentHeight:      sliderOuterColumn.y + sliderOuterColumn.height
             flickableDirection: Flickable.VerticalFlick
 
             QGCLabel {
                 id:             panelLabel
                 text:           panelTitle
-                font.weight:    Font.DemiBold
+                font.family:    ScreenTools.demiboldFontFamily
             }
 
 
             Column {
+                id:                 sliderOuterColumn
                 anchors.margins:    _margins
                 anchors.left:       parent.left
                 anchors.right:      parent.right
@@ -99,6 +100,8 @@ QGCView {
                         height:             sliderColumn.y + sliderColumn.height + _margins
                         color:              palette.windowShade
 
+                        property alias sliderValue: slider.value
+
                         Column {
                             id:                 sliderColumn
                             anchors.margins:    _margins
@@ -106,15 +109,16 @@ QGCView {
                             anchors.right:      parent.right
                             anchors.top:        sliderRect.top
 
-                            property alias sliderValue: slider.value
-
                             QGCLabel {
                                 text:           title
-                                font.weight:    Font.DemiBold
+                                font.family:    ScreenTools.demiboldFontFamily
                             }
 
                             QGCLabel {
-                                text: description
+                                text:           description
+                                anchors.left:   parent.left
+                                anchors.right:  parent.right
+                                wrapMode:       Text.WordWrap
                             }
 
                             Slider {

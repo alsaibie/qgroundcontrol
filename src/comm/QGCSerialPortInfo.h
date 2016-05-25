@@ -44,8 +44,10 @@ public:
         BoardTypePX4FMUV2,
         BoardTypePX4FMUV4,
         BoardTypePX4Flow,
-        BoardType3drRadio,
+        BoardTypeSikRadio,
         BoardTypeAeroCore,
+        BoardTypeRTKGPS,
+        BoardTypeMINDPXFMUV2,
         BoardTypeUnknown
     } BoardType_t;
 
@@ -62,8 +64,16 @@ public:
     
     static const int px4FlowProductId =                     21;     ///< Product ID for PX4 Flow board
 
+    static const int MindPXFMUV2ProductId =                 48;     ///< Product ID for the MindPX V2 board
+
     static const int threeDRRadioVendorId =                 1027;   ///< Vendor ID for 3DR Radio
     static const int threeDRRadioProductId =                24597;  ///< Product ID for 3DR Radio
+
+    static const int siLabsRadioVendorId =                  0x10c4; ///< Vendor ID for SILabs Radio
+    static const int siLabsRadioProductId =                 0xea60; ///< Product ID for SILabs Radio
+
+    static const int ubloxRTKVendorId =                     5446;   ///< Vendor ID for ublox RTK
+    static const int ubloxRTKProductId =                    424;    ///< Product ID for ublox RTK
 
     QGCSerialPortInfo(void);
     QGCSerialPortInfo(const QSerialPort & port);
@@ -73,12 +83,16 @@ public:
 
     BoardType_t boardType(void) const;
 
+    /// @return true: we can flash this board type
+    bool canFlash(void);
+
     /// @return true: board is a Pixhawk board
     bool boardTypePixhawk(void) const;
 
     /// @return true: Board is currently in bootloader
     bool isBootloader(void) const;
 
+private:
 };
 
 #endif

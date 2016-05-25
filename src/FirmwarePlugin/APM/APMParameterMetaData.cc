@@ -1,24 +1,24 @@
 /*=====================================================================
- 
+
  QGroundControl Open Source Ground Control Station
- 
+
  (c) 2009 - 2014 QGROUNDCONTROL PROJECT <http://www.qgroundcontrol.org>
- 
+
  This file is part of the QGROUNDCONTROL project
- 
+
  QGROUNDCONTROL is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
  the Free Software Foundation, either version 3 of the License, or
  (at your option) any later version.
- 
+
  QGROUNDCONTROL is distributed in the hope that it will be useful,
  but WITHOUT ANY WARRANTY; without even the implied warranty of
  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  GNU General Public License for more details.
- 
+
  You should have received a copy of the GNU General Public License
  along with QGROUNDCONTROL. If not, see <http://www.gnu.org/licenses/>.
- 
+
  ======================================================================*/
 
 #include "APMParameterMetaData.h"
@@ -37,8 +37,7 @@ QGC_LOGGING_CATEGORY(APMParameterMetaDataVerboseLog,    "APMParameterMetaDataVer
 APMParameterMetaData::APMParameterMetaData(void)
     : _parameterMetaDataLoaded(false)
 {
-    // APM meta data is not yet versioned
-    _loadParameterFactMetaData();
+
 }
 
 /// Converts a string to a typed QVariant
@@ -70,9 +69,9 @@ QVariant APMParameterMetaData::_stringToTypedVariant(const QString& string,
             convertTo = QVariant::Double;
             break;
     }
-    
+
     *convertOk = var.convert(convertTo);
-    
+
     return var;
 }
 
@@ -87,7 +86,6 @@ QString APMParameterMetaData::mavTypeToString(MAV_TYPE vehicleTypeEnum)
         case MAV_TYPE_QUADROTOR:
         case MAV_TYPE_COAXIAL:
         case MAV_TYPE_HELICOPTER:
-        case MAV_TYPE_SUBMARINE:
         case MAV_TYPE_HEXAROTOR:
         case MAV_TYPE_OCTOROTOR:
         case MAV_TYPE_TRICOPTER:
@@ -104,6 +102,9 @@ QString APMParameterMetaData::mavTypeToString(MAV_TYPE vehicleTypeEnum)
         case MAV_TYPE_GROUND_ROVER:
         case MAV_TYPE_SURFACE_BOAT:
             vehicleName = "ArduRover";
+            break;
+        case MAV_TYPE_SUBMARINE:
+            vehicleName = "ArduSub";
             break;
         case MAV_TYPE_FLAPPING_WING:
         case MAV_TYPE_KITE:
@@ -123,30 +124,19 @@ QString APMParameterMetaData::mavTypeToString(MAV_TYPE vehicleTypeEnum)
     return vehicleName;
 }
 
-/// Load Parameter Fact meta data
-///
-/// The meta data comes from firmware parameters.xml file.
-void APMParameterMetaData::_loadParameterFactMetaData()
+void APMParameterMetaData::loadParameterFactMetaDataFile(const QString& metaDataFile)
 {
     if (_parameterMetaDataLoaded) {
         return;
     }
     _parameterMetaDataLoaded = true;
 
-    QRegExp parameterCategories = QRegExp("ArduCopter|ArduPlane|APMrover2|AntennaTracker");
+    QRegExp parameterCategories = QRegExp("ArduCopter|ArduPlane|APMrover2|ArduSub|AntennaTracker");
     QString currentCategory;
 
-    QString parameterFilename;
+    qCDebug(APMParameterMetaDataLog) << "Loading parameter meta data:" << metaDataFile;
 
-    // Fixme:: always picking up the bundled xml, we would like to update it from web
-    // just not sure right now as the xml is in bad shape.
-    if (parameterFilename.isEmpty() || !QFile(parameterFilename).exists()) {
-        parameterFilename = ":/FirmwarePlugin/APM/APMParameterFactMetaData.xml";
-    }
-
-    qCDebug(APMParameterMetaDataLog) << "Loading parameter meta data:" << parameterFilename;
-
-    QFile xmlFile(parameterFilename);
+    QFile xmlFile(metaDataFile);
     Q_ASSERT(xmlFile.exists());
 
     bool success = xmlFile.open(QIODevice::ReadOnly);
@@ -591,15 +581,18 @@ void APMParameterMetaData::addMetaDataToFact(Fact* fact, MAV_TYPE vehicleType)
         }
     }
 
-    // FixMe:: not handling increment size as their is no place for it in FactMetaData and no ui
     fact->setMetaData(metaData);
 }
 
 void APMParameterMetaData::getParameterMetaDataVersionInfo(const QString& metaDataFile, int& majorVersion, int& minorVersion)
 {
-    Q_UNUSED(metaDataFile);
-
-    // Versioning not yet supported
     majorVersion = -1;
     minorVersion = -1;
+
+    // Meta data version is hacked in for now based on file name
+    QRegExp regExp(".*\\.(\\d)\\.(\\d)\\.xml$");
+    if (regExp.exactMatch(metaDataFile) && regExp.captureCount() == 2) {
+        majorVersion = regExp.cap(2).toInt();
+        minorVersion = 0;
+    }
 }

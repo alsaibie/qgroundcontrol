@@ -1,24 +1,24 @@
 /*=====================================================================
 
  QGroundControl Open Source Ground Control Station
- 
+
  (c) 2009 - 2015 QGROUNDCONTROL PROJECT <http://www.qgroundcontrol.org>
- 
+
  This file is part of the QGROUNDCONTROL project
- 
+
  QGROUNDCONTROL is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
  the Free Software Foundation, either version 3 of the License, or
  (at your option) any later version.
- 
+
  QGROUNDCONTROL is distributed in the hope that it will be useful,
  but WITHOUT ANY WARRANTY; without even the implied warranty of
  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  GNU General Public License for more details.
- 
+
  You should have received a copy of the GNU General Public License
  along with QGROUNDCONTROL. If not, see <http://www.gnu.org/licenses/>.
- 
+
  ======================================================================*/
 
 /// @file
@@ -29,24 +29,32 @@
 #include "QGCMAVLink.h"
 #include "QGCApplication.h"
 
+#include <QTcpSocket>
+
 QGC_LOGGING_CATEGORY(APMFirmwarePluginLog, "APMFirmwarePluginLog")
 
 static const QRegExp APM_COPTER_REXP("^(ArduCopter|APM:Copter)");
+static const QRegExp APM_SOLO_REXP("^(APM:Copter solo-)");
 static const QRegExp APM_PLANE_REXP("^(ArduPlane|APM:Plane)");
 static const QRegExp APM_ROVER_REXP("^(ArduRover|APM:Rover)");
+static const QRegExp APM_SUB_REXP("^(ArduSub|APM:Sub)");
 static const QRegExp APM_PX4NUTTX_REXP("^PX4: .*NuttX: .*");
 static const QRegExp APM_FRAME_REXP("^Frame: ");
 static const QRegExp APM_SYSID_REXP("^PX4v2 ");
 
 // Regex to parse version text coming from APM, gives out firmware type, major, minor and patch level numbers
-static const QRegExp VERSION_REXP("^(APM:Copter|APM:Plane|APM:Rover|ArduCopter|ArduPlane|ArduRover) +[vV](\\d*)\\.*(\\d*)*\\.*(\\d*)*");
+static const QRegExp VERSION_REXP("^(APM:Copter|APM:Plane|APM:Rover|APM:Sub|ArduCopter|ArduPlane|ArduRover|ArduSub) +[vV](\\d*)\\.*(\\d*)*\\.*(\\d*)*");
 
 // minimum firmware versions that don't suffer from mavlink severity inversion bug.
 // https://github.com/diydrones/apm_planner/issues/788
+static const QString MIN_SOLO_VERSION_WITH_CORRECT_SEVERITY_MSGS("APM:Copter solo-1.2.0");
 static const QString MIN_COPTER_VERSION_WITH_CORRECT_SEVERITY_MSGS("APM:Copter V3.4.0");
 static const QString MIN_PLANE_VERSION_WITH_CORRECT_SEVERITY_MSGS("APM:Plane V3.4.0");
+static const QString MIN_SUB_VERSION_WITH_CORRECT_SEVERITY_MSGS("APM:Sub V3.4.0");
 static const QString MIN_ROVER_VERSION_WITH_CORRECT_SEVERITY_MSGS("APM:Rover V2.6.0");
 
+const char* APMFirmwarePlugin::_artooIP =                   "10.1.1.1"; ///< IP address of ARTOO controller
+const int   APMFirmwarePlugin::_artooVideoHandshakePort =   5502;       ///< Port for video handshake on ARTOO controller
 
 /*
  * @brief APMFirmwareVersion is a small class to represent the firmware version
@@ -155,12 +163,12 @@ bool APMFirmwarePlugin::isCapable(FirmwareCapabilities capabilities)
 QList<VehicleComponent*> APMFirmwarePlugin::componentsForVehicle(AutoPilotPlugin* vehicle)
 {
     Q_UNUSED(vehicle);
-    
+
     return QList<VehicleComponent*>();
 }
 
 QStringList APMFirmwarePlugin::flightModes(void)
-{   
+{
     QStringList flightModesList;
     foreach (const APMCustomMode& customMode, _supportedModes) {
         if (customMode.canBeSet()) {
@@ -300,51 +308,51 @@ void APMFirmwarePlugin::_handleParamSet(Vehicle* vehicle, mavlink_message_t* mes
     mavlink_msg_param_set_encode(message->sysid, message->compid, message, &paramSet);
 }
 
-void APMFirmwarePlugin::_handleStatusText(Vehicle* vehicle, mavlink_message_t* message)
+bool APMFirmwarePlugin::_handleStatusText(Vehicle* vehicle, mavlink_message_t* message)
 {
     QString messageText;
 
     mavlink_statustext_t statusText;
     mavlink_msg_statustext_decode(message, &statusText);
 
-    if (!_firmwareVersion.isValid() || statusText.severity < MAV_SEVERITY_NOTICE) {
+    if (vehicle->firmwareMajorVersion() == Vehicle::versionNotSetValue || statusText.severity < MAV_SEVERITY_NOTICE) {
         messageText = _getMessageText(message);
         qCDebug(APMFirmwarePluginLog) << messageText;
 
-        if (!_firmwareVersion.isValid()) {
+        if (!messageText.contains(APM_SOLO_REXP)) {
             // if don't know firmwareVersion yet, try and see if this message contains it
-            if (messageText.contains(APM_COPTER_REXP) || messageText.contains(APM_PLANE_REXP) || messageText.contains(APM_ROVER_REXP)) {
+            if (messageText.contains(APM_COPTER_REXP) || messageText.contains(APM_PLANE_REXP) || messageText.contains(APM_ROVER_REXP) || messageText.contains(APM_SUB_REXP)) {
                 // found version string
-                _firmwareVersion = APMFirmwareVersion(messageText);
-                _textSeverityAdjustmentNeeded = _isTextSeverityAdjustmentNeeded(_firmwareVersion);
+                APMFirmwareVersion firmwareVersion(messageText);
+                _textSeverityAdjustmentNeeded = _isTextSeverityAdjustmentNeeded(firmwareVersion);
 
-                if (!_firmwareVersion.isBeta() && !_firmwareVersion.isDev()) {
-                    int supportedMajorNumber = -1;
-                    int supportedMinorNumber = -1;
+                vehicle->setFirmwareVersion(firmwareVersion.majorNumber(), firmwareVersion.minorNumber(), firmwareVersion.patchNumber());
 
-                    switch (vehicle->vehicleType()) {
-                    case MAV_TYPE_FIXED_WING:
-                        supportedMajorNumber = 3;
-                        supportedMinorNumber = 2;
-                        break;
-                    case MAV_TYPE_QUADROTOR:
-                    case MAV_TYPE_COAXIAL:
-                    case MAV_TYPE_HELICOPTER:
-                    case MAV_TYPE_SUBMARINE:
-                    case MAV_TYPE_HEXAROTOR:
-                    case MAV_TYPE_OCTOROTOR:
-                    case MAV_TYPE_TRICOPTER:
-                        supportedMajorNumber = 3;
-                        supportedMinorNumber = 2;
-                        break;
-                    default:
-                        break;
-                    }
+                int supportedMajorNumber = -1;
+                int supportedMinorNumber = -1;
 
-                    if (supportedMajorNumber != -1) {
-                        if (_firmwareVersion.majorNumber() < supportedMajorNumber || _firmwareVersion.minorNumber() < supportedMinorNumber) {
-                            qgcApp()->showMessage(QString("QGroundControl fully supports Version %1.%2 and above. You are using a version prior to that. This combination is untested, you may run into unpredictable results.").arg(supportedMajorNumber).arg(supportedMinorNumber));
-                        }
+                switch (vehicle->vehicleType()) {
+                case MAV_TYPE_FIXED_WING:
+                    supportedMajorNumber = 3;
+                    supportedMinorNumber = 2;
+                    break;
+                case MAV_TYPE_QUADROTOR:
+                case MAV_TYPE_COAXIAL:
+                case MAV_TYPE_HELICOPTER:
+                case MAV_TYPE_SUBMARINE:
+                case MAV_TYPE_HEXAROTOR:
+                case MAV_TYPE_OCTOROTOR:
+                case MAV_TYPE_TRICOPTER:
+                    supportedMajorNumber = 3;
+                    supportedMinorNumber = 2;
+                    break;
+                default:
+                    break;
+                }
+
+                if (supportedMajorNumber != -1) {
+                    if (firmwareVersion.majorNumber() < supportedMajorNumber || firmwareVersion.minorNumber() < supportedMinorNumber) {
+                        qgcApp()->showMessage(QString("QGroundControl fully supports Version %1.%2 and above. You are using a version prior to that. This combination is untested, you may run into unpredictable results.").arg(supportedMajorNumber).arg(supportedMinorNumber));
                     }
                 }
             }
@@ -355,7 +363,7 @@ void APMFirmwarePlugin::_handleStatusText(Vehicle* vehicle, mavlink_message_t* m
 
         if (messageText.contains("Place vehicle") || messageText.contains("Calibration successful")) {
             _adjustCalibrationMessageSeverity(message);
-            return;
+            return true;
         }
     }
 
@@ -370,10 +378,33 @@ void APMFirmwarePlugin::_handleStatusText(Vehicle* vehicle, mavlink_message_t* m
 
     // The following messages are incorrectly labeled as warning message.
     // Fixed in newer firmware (unreleased at this point), but still in older firmware.
-    if (messageText.contains(APM_COPTER_REXP) || messageText.contains(APM_PLANE_REXP) || messageText.contains(APM_ROVER_REXP) ||
+    if (messageText.contains(APM_COPTER_REXP) || messageText.contains(APM_PLANE_REXP) || messageText.contains(APM_ROVER_REXP) || messageText.contains(APM_SUB_REXP) ||
             messageText.contains(APM_PX4NUTTX_REXP) || messageText.contains(APM_FRAME_REXP) || messageText.contains(APM_SYSID_REXP)) {
         _setInfoSeverity(message);
     }
+
+    if (messageText.contains(APM_SOLO_REXP)) {
+        qDebug() << "Found Solo";
+
+        // Fix up severity
+        _setInfoSeverity(message);
+
+        // Start TCP video handshake with ARTOO
+        _soloVideoHandshake(vehicle);
+    }
+
+    if (messageText.startsWith("PreArm")) {
+        // ArduPilot PreArm messages can come across very frequently especially on Solo, which seems to send them once a second.
+        // Filter them out if they come too quickly.
+        if (_noisyPrearmMap.contains(messageText) && _noisyPrearmMap[messageText].msecsTo(QTime::currentTime()) < (10 * 1000)) {
+            return false;
+        }
+        _noisyPrearmMap[messageText] = QTime::currentTime();
+
+        vehicle->setPrearmError(messageText);
+    }
+
+    return true;
 }
 
 void APMFirmwarePlugin::_handleHeartbeat(Vehicle* vehicle, mavlink_message_t* message)
@@ -396,11 +427,11 @@ void APMFirmwarePlugin::_handleHeartbeat(Vehicle* vehicle, mavlink_message_t* me
     vehicle->setFlying(flying);
 }
 
-void APMFirmwarePlugin::adjustIncomingMavlinkMessage(Vehicle* vehicle, mavlink_message_t* message)
+bool APMFirmwarePlugin::adjustIncomingMavlinkMessage(Vehicle* vehicle, mavlink_message_t* message)
 {
     //-- Don't process messages to/from UDP Bridge. It doesn't suffer from these issues
     if (message->compid == MAV_COMP_ID_UDP_BRIDGE) {
-        return;
+        return true;
     }
 
     switch (message->msgid) {
@@ -408,12 +439,13 @@ void APMFirmwarePlugin::adjustIncomingMavlinkMessage(Vehicle* vehicle, mavlink_m
         _handleParamValue(vehicle, message);
         break;
     case MAVLINK_MSG_ID_STATUSTEXT:
-        _handleStatusText(vehicle, message);
-        break;
+        return _handleStatusText(vehicle, message);
     case MAVLINK_MSG_ID_HEARTBEAT:
         _handleHeartbeat(vehicle, message);
         break;
     }
+
+    return true;
 }
 
 void APMFirmwarePlugin::adjustOutgoingMavlinkMessage(Vehicle* vehicle, mavlink_message_t* message)
@@ -459,6 +491,10 @@ bool APMFirmwarePlugin::_isTextSeverityAdjustmentNeeded(const APMFirmwareVersion
         }
     } else if (firmwareVersion.vehicleType().contains(APM_ROVER_REXP)) {
         if (firmwareVersion < APMFirmwareVersion(MIN_ROVER_VERSION_WITH_CORRECT_SEVERITY_MSGS)) {
+            adjustmentNeeded = true;
+        }
+    } else if (firmwareVersion.vehicleType().contains(APM_SUB_REXP)) {
+        if (firmwareVersion < APMFirmwareVersion(MIN_SUB_VERSION_WITH_CORRECT_SEVERITY_MSGS)) {
             adjustmentNeeded = true;
         }
     }
@@ -571,7 +607,8 @@ QObject* APMFirmwarePlugin::loadParameterMetaData(const QString& metaDataFile)
 {
     Q_UNUSED(metaDataFile);
 
-    APMParameterMetaData* metaData = new APMParameterMetaData;
+    APMParameterMetaData* metaData = new APMParameterMetaData();
+    metaData->loadParameterFactMetaDataFile(metaDataFile);
     return metaData;
 }
 
@@ -584,4 +621,49 @@ void APMFirmwarePlugin::pauseVehicle(Vehicle* vehicle)
 {
     // Best we can do in this case
     vehicle->setFlightMode("Loiter");
+}
+
+void APMFirmwarePlugin::_soloVideoHandshake(Vehicle* vehicle)
+{
+    Q_UNUSED(vehicle);
+
+    QTcpSocket* socket = new QTcpSocket();
+
+    socket->connectToHost(_artooIP, _artooVideoHandshakePort);
+    QObject::connect(socket, static_cast<void (QTcpSocket::*)(QAbstractSocket::SocketError)>(&QTcpSocket::error), this, &APMFirmwarePlugin::_artooSocketError);
+}
+
+void APMFirmwarePlugin::_artooSocketError(QAbstractSocket::SocketError socketError)
+{
+    qgcApp()->showMessage(tr("Error during Solo video link setup: %1").arg(socketError));
+}
+
+QString APMFirmwarePlugin::getParameterMetaDataFile(Vehicle* vehicle)
+{
+    switch (vehicle->vehicleType()) {
+    case MAV_TYPE_QUADROTOR:
+    case MAV_TYPE_HEXAROTOR:
+    case MAV_TYPE_OCTOROTOR:
+    case MAV_TYPE_TRICOPTER:
+    case MAV_TYPE_COAXIAL:
+    case MAV_TYPE_HELICOPTER:
+        if (vehicle->firmwareMajorVersion() < 3 || (vehicle->firmwareMajorVersion() == 3 && vehicle->firmwareMinorVersion() <= 3)) {
+            return QStringLiteral(":/FirmwarePlugin/APM/APMParameterFactMetaData.Copter.3.3.xml");
+        } else {
+            return QStringLiteral(":/FirmwarePlugin/APM/APMParameterFactMetaData.Copter.3.4.xml");
+        }
+    case MAV_TYPE_FIXED_WING:
+        if (vehicle->firmwareMajorVersion() < 3 || (vehicle->firmwareMajorVersion() == 3 && vehicle->firmwareMinorVersion() <= 3)) {
+            return QStringLiteral(":/FirmwarePlugin/APM/APMParameterFactMetaData.Plane.3.3.xml");
+        } else {
+            return QStringLiteral(":/FirmwarePlugin/APM/APMParameterFactMetaData.Plane.3.5.xml");
+        }
+    case MAV_TYPE_GROUND_ROVER:
+    case MAV_TYPE_SURFACE_BOAT:
+        return QStringLiteral(":/FirmwarePlugin/APM/APMParameterFactMetaData.Rover.3.0.xml");
+    case MAV_TYPE_SUBMARINE:
+        return QStringLiteral(":/FirmwarePlugin/APM/APMParameterFactMetaData.Sub.3.4.xml");
+    default:
+        return QString();
+    }
 }

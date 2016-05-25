@@ -150,12 +150,8 @@ public:
     static MockLink* startAPMArduCopterMockLink  (bool sendStatusText);
     static MockLink* startAPMArduPlaneMockLink   (bool sendStatusText);
 
-signals:
-    /// @brief Used internally to move data to the thread.
-    void _incomingBytes(const QByteArray bytes);
-
-public slots:
-    virtual void writeBytes(const char *bytes, qint64 cBytes);
+private slots:
+    virtual void _writeBytes(const QByteArray bytes);
 
 private slots:
     void _run1HzTasks(void);
@@ -172,7 +168,6 @@ private:
 
     // MockLink methods
     void _sendHeartBeat(void);
-    void _handleIncomingBytes(const QByteArray bytes);
     void _handleIncomingNSHBytes(const char* bytes, int cBytes);
     void _handleIncomingMavlinkBytes(const uint8_t* bytes, int cBytes);
     void _loadParams(void);
@@ -190,6 +185,7 @@ private:
     void _sendGpsRawInt(void);
     void _sendVibration(void);
     void _sendStatusTextMessages(void);
+    void _respondWithAutopilotVersion(void);
 
     static MockLink* _startMockLink(MockConfiguration* mockConfig);
 

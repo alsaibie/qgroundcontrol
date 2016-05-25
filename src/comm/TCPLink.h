@@ -46,7 +46,7 @@
 
 //#define TCPLINK_READWRITE_DEBUG   // Use to debug data reads/writes
 
-class TCPLinkUnitTest;
+class TCPLinkTest;
 
 #define QGC_TCP_PORT 5760
 
@@ -128,7 +128,7 @@ class TCPLink : public LinkInterface
 {
     Q_OBJECT
 
-    friend class TCPLinkUnitTest;
+    friend class TCPLinkTest;
     friend class TCPConfiguration;
     friend class LinkManager;
 
@@ -152,10 +152,11 @@ public:
     bool connect(void);
     bool disconnect(void);
 
-public slots:
-
+private slots:
     // From LinkInterface
-    void writeBytes(const char* data, qint64 length);
+    void _writeBytes(const QByteArray data);
+
+public slots:
     void waitForBytesWritten(int msecs);
     void waitForReadyRead(int msecs);
 
@@ -182,7 +183,7 @@ private:
     void _restartConnection();
 
 #ifdef TCPLINK_READWRITE_DEBUG
-    void _writeDebugBytes(const char *data, qint16 size);
+    void _writeDebugBytes(const QByteArray data);
 #endif
 
     TCPConfiguration* _config;
